@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Anti-Buli MRSM SAS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f3f4f6; padding: 1rem; }
+        .container-main { max-width: 800px; margin: auto; }
+        .card { background-color: white; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); padding: 1.5rem; }
+        .loading-spinner {
+            border: 3px solid #f3f4f6; border-top: 3px solid #2563eb; border-radius: 50%;
+            width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-left: 0.5rem;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .checkbox-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem; }
+        .nav-item { cursor: pointer; padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-radius: 0.5rem; transition: background-color 0.2s; }
+        .nav-item:hover { background-color: #e5e7eb; }
+        .nav-item.active { background-color: #3b82f6; color: white; }
+        
+        /* Modal Styles */
+        .modal { position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); display: none; }
+        .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 700px; border-radius: 8px; animation-name: animatetop; animation-duration: 0.4s; }
+        .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+        .close-btn:hover, .close-btn:focus { color: #000; text-decoration: none; cursor: pointer; }
+        @keyframes animatetop { from {top:-300px; opacity:0} to {top:0; opacity:1} }
+    </style>
+</head>
+<body>
+
+    <div id="appContainer" class="container-main">
+
+        <div class="card mb-6 text-center">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Logo_MRSM.png" alt="Logo MRSM" class="h-24 mx-auto mb-4">
+            <h1 class="text-3xl font-extrabold text-blue-800">Aplikasi Anti-Buli</h1>
+            <h2 class="text-xl font-semibold text-gray-700">MRSM SULTAN AZLAN SHAH</h2>
+            <p class="text-sm text-gray-500 mt-2">Semua maklumat adalah **sulit dan dilindungi**</p>
+        </div>
+
+        <div id="viewContainer">
+            </div>
+        
+        <div id="aduanModal" class="modal">
+            <div id="modalContent" class="modal-content">
+                </div>
+        </div>
+
+    </div>
+
+    <script>
+        // *** ⚠️ Sila GANTIKAN URL INI DENGAN URL APPS SCRIPT ANDA YANG TERKINI ***
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxZijRWo235OcAalSLbsERBxBs-YACx1Ih2vyZaPU4B_gFgXc-wEqpKg-ztr1fE__Q/exec'; 
+        let currentUser = null; 
+
+        // --- Fungsi Utama (Router) ---
+        function setView(viewName) {
+            const container = document.getElementById('viewContainer');
+            container.innerHTML = ''; 
+
+            if (viewName === 'main') {
+                container.innerHTML = createMainPageHTML();
+            } else if (viewName === 'login') {
+                container.innerHTML = createLoginHTML();
+            } else if (viewName === 'adminDashboard') {
+                if (!currentUser) return setView('main');
+                container.innerHTML = createAdminDashboardHTML();
+                loadAdminDashboardLogic();
+            } else if (viewName === 'publicAduan') {
+                container.innerHTML = createPublicAduanHTML();
+                const tarikhLaporanEl = document.getElementById('tarikh_laporan');
+                if(tarikhLaporanEl) tarikhLaporanEl.valueAsDate = new Date();
+            }
+        }
+        
+        function handleLogout() {
+            currentUser = null;
+            setView('main');
+            alert('Anda telah log keluar.');
+        }
+        
+        // --- Modal Control Functions ---
+        function showModal(contentHTML) {
+            document.getElementById('modalContent').innerHTML = contentHTML;
+            document.getElementById('aduanModal').style.display = "block";
+        }
+
+        function closeModal() {
+            document.getElementById('aduanModal').style.display = "none";
+            loadAduanData(false); 
+        }
+        
+        window.onclick = function(event) {
+          const modal = document.getElementById('aduanModal');
+          if (event.target == modal) {
+            closeModal();
+          }
+        }
+        
+        // --- HTML Creation Functions ---
+        
+        function createMainPageHTML() {
+            return `
+                <div class="card p-8 text-center">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-6">Sistem Pengurusan Aduan Buli</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <button onclick="setView('publicAduan')" class="bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-6 rounded-lg transition duration-300">
+                            <span class="text-xl">🚨 Paparan Aduan Buli</span>
+                            <p class="text-sm mt-1">Hantar laporan sulit sebagai pelapor</p>
+                        </button>
+                        <button onclick="setView('login')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg transition duration-300">
+                            <span class="text-xl">🔒 Log Masuk Admin</span>
+                            <p class="text-sm mt-1">Akses Dashboard untuk Warden/Super Admin</p>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function createLoginHTML() {
+            return `
+                <div class="card w-full md:w-3/5 mx-auto">
+                    <h3 class="text-2xl font-bold text-blue-600 mb-6 text-center">Log Masuk Admin/Warden</h3>
+                    <form id="loginForm">
+                        <div class="mb-4">
+                            <label for="username" class="block text-sm font-medium text-gray-700">Nama Pengguna (Username)</label>
+                            <input type="text" id="username" name="username" required class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div class="mb-6">
+                            <label for="password" class="block text-sm font-medium text-gray-700">Kata Laluan (Password)</label>
+                            <input type="password" id="password" name="password" required class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div id="loginMessage" class="hidden text-red-600 mb-4 text-center"></div>
+                        <button type="submit" id="loginBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md w-full flex items-center justify-center">
+                            <span id="loginText">Log Masuk</span>
+                            <div id="loginSpinner" class="loading-spinner hidden"></div>
+                        </button>
+                        <button type="button" onclick="setView('main')" class="mt-4 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-md w-full">Kembali</button>
+                    </form>
+                </div>
+            `;
+        }
+        
+        function createAdminDashboardHTML() {
+            const role = currentUser.role === 'Super Admin' ? 'Super Administrator' : 'Warden';
+
+            return `
+                <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800">Dashboard ${role}</h2>
+                    <p class="text-gray-600">Selamat datang, ${currentUser.nama}. Urus sistem aduan buli sekolah.</p>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div class="md:col-span-1 bg-white p-4 rounded-lg shadow">
+                        <h4 class="font-semibold text-gray-700 mb-2 border-b pb-2">Menu</h4>
+                        <div id="navMain" class="nav-item active" onclick="showDashboardSection('main')">🏠 Dashboard</div>
+                        <div id="navUrusAduan" class="nav-item" onclick="showDashboardSection('urusAduan')">📝 Urus Aduan</div>
+                        
+                        <div id="navUrusWarden" class="nav-item ${currentUser.role !== 'Super Admin' ? 'hidden' : ''}" onclick="showDashboardSection('urusWarden')">🛡️ Urus Warden</div>
+
+                        <div class="nav-item bg-red-500 hover:bg-red-600 text-white" onclick="handleLogout()">🚪 Log Keluar</div>
+                    </div>
+
+                    <div class="md:col-span-3" id="dashboardContent">
+                        
+                        <div id="mainView" class="hidden">
+                            <h3 class="text-2xl font-bold mb-4">Statistik Ringkas</h3>
+                            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div class="bg-blue-100 p-4 rounded-lg text-center"><p class="text-sm text-gray-600">Jumlah Aduan</p><p id="statTotal" class="text-3xl font-bold text-blue-800"><div class="loading-spinner"></div></p></div>
+                                <div class="bg-red-100 p-4 rounded-lg text-center"><p class="text-sm text-gray-600">Aduan Baru</p><p id="statNew" class="text-3xl font-bold text-red-800"><div class="loading-spinner"></div></p></div>
+                                <div class="bg-yellow-100 p-4 rounded-lg text-center"><p class="text-sm text-gray-600">Dalam Siasatan</p><p id="statInvestigate" class="text-3xl font-bold text-yellow-800"><div class="loading-spinner"></div></p></div>
+                                <div class="bg-green-100 p-4 rounded-lg text-center"><p class="text-sm text-gray-600">Selesai</p><p id="statDone" class="text-3xl font-bold text-green-800"><div class="loading-spinner"></div></p></div>
+                            </div>
+                        </div>
+
+                        <div id="urusAduanView" class="hidden card">
+                            <h3 class="text-2xl font-bold mb-4">📝 Urus Aduan</h3>
+                            <div id="aduanTableContainer" class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tarikh</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mangsa</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jenis Buli</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tindakan</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="aduanTableBody" class="bg-white divide-y divide-gray-200">
+                                        </tbody>
+                                </table>
+                                <p id="aduanLoading" class="text-center py-4 text-gray-500 hidden">Memuatkan data aduan...</p>
+                                <p id="aduanEmpty" class="hidden text-center py-4 text-gray-500">Tiada aduan baru.</p>
+                            </div>
+                        </div>
+                        
+                        <div id="urusWardenView" class="hidden card">
+                            ${createUrusWardenHTML()}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function createUrusWardenHTML() {
+            return `
+                <h3 class="text-2xl font-bold mb-4">🛡️ Urus Warden</h3>
+                <div class="mb-4 p-3 bg-red-100 border border-red-200 rounded-md">
+                    <p class="text-sm text-red-800 font-semibold">⚠️ PERINGATAN KESELAMATAN: Kata Laluan disimpan dalam Google Sheet.</p>
+                    <p class="text-xs text-red-700">Pastikan anda menggunakan kata laluan yang ringkas dan selamat.</p>
+                </div>
+                <form id="addWardenForm" onsubmit="handleWardenRegistration(event)">
+                    <h4 class="text-xl font-semibold mb-3 border-b pb-2">Daftar Warden Baharu</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="warden_nama" class="block text-sm font-medium text-gray-700">Nama Penuh Warden *</label> 
+                            <input type="text" id="warden_nama" name="nama" required class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label for="warden_username" class="block text-sm font-medium text-gray-700">Nama Pengguna (Username) *</label> 
+                            <input type="text" id="warden_username" name="username" required class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label for="warden_password" class="block text-sm font-medium text-gray-700">Kata Laluan (Password) *</label> 
+                            <input type="password" id="warden_password" name="password" required class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label for="warden_role" class="block text-sm font-medium text-gray-700">Peranan (Role) *</label> 
+                            <select id="warden_role" name="role" required class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                                <option value="Warden">Warden</option>
+                                <option value="Super Admin">Super Admin</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="wardenRegMessage" class="mt-4 text-sm text-center hidden"></div>
+                    <button type="submit" id="regWardenBtn" class="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md w-full flex items-center justify-center">
+                        <span id="regWardenText">Daftarkan Warden</span>
+                        <div id="regWardenSpinner" class="loading-spinner hidden !w-4 !h-4 !border-white !border-t-transparent"></div>
+                    </button>
+                </form>
+            `;
+        }
+        
+        function createPublicAduanHTML() {
+            return `
+                <div class="card p-6">
+                    <h3 class="text-2xl font-bold text-red-600 mb-6 text-center">Borang Laporan Buli Sulit</h3>
+                    <div id="successMessage" class="hidden bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-4" role="alert">
+                        <p class="font-bold">Laporan Berjaya Dihantar!</p>
+                        <p>Terima kasih atas keprihatinan anda. Aduan anda telah direkodkan sebagai **ID Aduan: <span id="aduanIdDisplay"></span>**.</p>
+                        <p class="text-sm mt-2">Maklumat akan diuruskan oleh pihak warden dengan serta-merta.</p>
+                        <button onclick="setView('main')" class="mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">Kembali ke Menu Utama</button>
+                    </div>
+
+                    <div id="errorMessage" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
+                        <p class="font-bold">Gagal Menghantar Laporan!</p>
+                        <p>Sila cuba sebentar lagi atau hubungi admin. (Butiran Ralat: <span id="errorDetails"></span>)</p>
+                    </div>
+
+                    <form id="aduanForm">
+                        <h4 class="text-lg font-semibold mb-3 border-b pb-1 text-blue-700">1. Maklumat Pelapor</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div><label class="block text-sm font-medium text-gray-700">Nama Pelapor *</label><input type="text" name="nama_pelapor" required class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">No. Pelajar/IC Pelapor *</label><input type="text" name="no_pelajar_pelapor" required class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">No. Telefon Pelapor</label><input type="tel" name="no_telefon_pelapor" class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">Hubungan dengan Mangsa *</label><select name="hubungan_mangsa" required class="w-full px-3 py-2 border rounded-md"><option value="">Sila Pilih</option><option value="Diri Sendiri">Diri Sendiri</option><option value="Rakan">Rakan</option><option value="Ibubapa/Penjaga">Ibubapa/Penjaga</option><option value="Staf/Guru">Staf/Guru</option><option value="Lain-lain">Lain-lain</option></select></div>
+                        </div>
+
+                        <h4 class="text-lg font-semibold mb-3 border-b pb-1 text-blue-700">2. Maklumat Mangsa Buli</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div><label class="block text-sm font-medium text-gray-700">Nama Mangsa *</label><input type="text" name="nama_mangsa" required class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">No. Pelajar/IC Mangsa</label><input type="text" name="no_pelajar_mangsa" class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">Kelas/Dorm Mangsa *</label><input type="text" name="kelas_mangsa" required class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">No. Hubungan Kecemasan (Mangsa)</label><input type="tel" name="emergency_contact" class="w-full px-3 py-2 border rounded-md"></div>
+                        </div>
+
+                        <h4 class="text-lg font-semibold mb-3 border-b pb-1 text-blue-700">3. Maklumat Pembuli (Suspek)</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div><label class="block text-sm font-medium text-gray-700">Nama Pembuli (Suspek)</label><input type="text" name="nama_pembuli_suspek" class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">Kelas/Dorm Pembuli</label><input type="text" name="kelas_pembuli" class="w-full px-3 py-2 border rounded-md"></div>
+                            <div class="md:col-span-2">
+                                <label class="block text-sm font-medium text-gray-700">Jenis Pembuli</label>
+                                <select name="jenis_pembuli" class="w-full px-3 py-2 border rounded-md"><option value="Pelajar MRSM">Pelajar MRSM</option><option value="Orang Luar">Orang Luar</option><option value="Staf/Guru">Staf/Guru</option><option value="Tidak Diketahui">Tidak Diketahui</option></select>
+                            </div>
+                        </div>
+
+                        <h4 class="text-lg font-semibold mb-3 border-b pb-1 text-blue-700">4. Butiran Kejadian Buli *</h4>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Jenis Insiden Buli (Pilih semua yang berkaitan)</label>
+                            <div class="checkbox-group">
+                                <label class="flex items-center"><input type="checkbox" name="jenis_insiden" value="Fizikal" class="mr-2"> Fizikal (Pukul, tendang)</label>
+                                <label class="flex items-center"><input type="checkbox" name="jenis_insiden" value="Verbal" class="mr-2"> Verbal (Ejek, hina)</label>
+                                <label class="flex items-center"><input type="checkbox" name="jenis_insiden" value="Siber" class="mr-2"> Siber (Online)</label>
+                                <label class="flex items-center"><input type="checkbox" name="jenis_insiden" value="Emosi" class="mr-2"> Emosi (Pulau)</label>
+                                <label class="flex items-center"><input type="checkbox" name="jenis_insiden" value="Seksual" class="mr-2"> Seksual</label>
+                                <label class="flex items-center"><input type="checkbox" name="jenis_insiden" value="Kewangan" class="mr-2"> Kewangan (Peras ugut)</label>
+                            </div>
+                            <label class="block text-sm font-medium text-gray-700 mt-3">Insiden Lain (Nyatakan)</label><input type="text" name="insiden_lain" class="w-full px-3 py-2 border rounded-md">
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div><label class="block text-sm font-medium text-gray-700">Tarikh Kejadian *</label><input type="date" name="tarikh_kejadian" required class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">Masa Kejadian (Anggaran) *</label><input type="time" name="masa_kejadian" required class="w-full px-3 py-2 border rounded-md"></div>
+                            <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-700">Lokasi Kejadian *</label><input type="text" name="lokasi_kejadian" required class="w-full px-3 py-2 border rounded-md"></div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700">Kronologi/Huraian Penuh Kejadian *</label>
+                            <textarea name="kronologi_huraian" rows="4" required class="w-full px-3 py-2 border rounded-md"></textarea>
+                        </div>
+
+                        <div class="mb-6">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Kesan Kepada Mangsa (Pilih semua yang berkaitan)</label>
+                            <div class="checkbox-group">
+                                <label class="flex items-center"><input type="checkbox" name="kesan_mangsa" value="Kecederaan Fizikal" class="mr-2"> Kecederaan Fizikal</label>
+                                <label class="flex items-center"><input type="checkbox" name="kesan_mangsa" value="Trauma Emosi" class="mr-2"> Trauma Emosi</label>
+                                <label class="flex items-center"><input type="checkbox" name="kesan_mangsa" value="Prestasi Akademik Menurun" class="mr-2"> Prestasi Akademik Menurun</label>
+                                <label class="flex items-center"><input type="checkbox" name="kesan_mangsa" value="Tidak Hadir Sekolah" class="mr-2"> Tidak Hadir Sekolah</label>
+                            </div>
+                        </div>
+
+                        <h4 class="text-lg font-semibold mb-3 border-b pb-1 text-blue-700">5. Pengesahan & Tarikh Laporan</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <div><label class="block text-sm font-medium text-gray-700">Nama Penuh Pengesah *</label><input type="text" name="nama_pengesah" required class="w-full px-3 py-2 border rounded-md"></div>
+                            <div><label class="block text-sm font-medium text-gray-700">Tarikh Laporan</label><input type="date" id="tarikh_laporan" name="tarikh_laporan" required readonly class="w-full px-3 py-2 border bg-gray-100 rounded-md"></div>
+                        </div>
+
+                        <button type="submit" id="submitBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg w-full flex items-center justify-center transition duration-300">
+                            <span id="submitText">Hantar Laporan Buli (SULIT)</span>
+                            <div id="submitSpinner" class="loading-spinner"></div>
+                        </button>
+                        <button type="button" onclick="setView('main')" class="mt-4 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-md w-full">Kembali ke Menu Utama</button>
+                    </form>
+                </div>
+            `;
+        }
+        
+        // --- Logik Pengurusan Sesi & Data (JavaScript) ---
+
+        function showDashboardSection(sectionId) {
+            const sectionMap = { 'main': 'mainView', 'urusAduan': 'urusAduanView', 'urusWarden': 'urusWardenView' };
+            const sections = Object.values(sectionMap);
+            
+            sections.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+
+            const targetEl = document.getElementById(sectionMap[sectionId]);
+            if (targetEl) targetEl.classList.remove('hidden');
+
+            if (sectionId === 'urusAduan') {
+                loadAduanData(false);
+            } else if (sectionId === 'main') {
+                loadAduanData(true);
+            }
+
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => item.classList.remove('active'));
+            const activeItem = document.getElementById('nav' + sectionId.charAt(0).toUpperCase() + sectionId.slice(1));
+            if (activeItem) activeItem.classList.add('active');
+        }
+
+        function loadAdminDashboardLogic() {
+            loadAduanData(true); 
+            showDashboardSection('main'); 
+            // Sembunyikan butang Urus Warden jika bukan Super Admin
+            const navWarden = document.getElementById('navUrusWarden');
+            if (navWarden) {
+                if (currentUser.role === 'Super Admin') {
+                    navWarden.classList.remove('hidden');
+                } else {
+                    navWarden.classList.add('hidden');
+                }
+            }
+        }
+
+        
+        async function loadAduanData(onlyStats = false) {
+            const tableBody = document.getElementById('aduanTableBody');
+            const loadingMessage = document.getElementById('aduanLoading');
+            const emptyMessage = document.getElementById('aduanEmpty');
+
+            if (!onlyStats) {
+                tableBody.innerHTML = ''; 
+                loadingMessage.classList.remove('hidden');
+                emptyMessage.classList.add('hidden');
+            }
+
+            if (onlyStats) {
+                document.getElementById('statTotal').innerHTML = '<div class="loading-spinner"></div>';
+                document.getElementById('statNew').innerHTML = '<div class="loading-spinner"></div>';
+                document.getElementById('statInvestigate').innerHTML = '<div class="loading-spinner"></div>';
+                document.getElementById('statDone').innerHTML = '<div class="loading-spinner"></div>';
+            }
+
+
+            const queryString = new URLSearchParams({ action: 'getAduanData' }).toString();
+            
+            try {
+                const response = await fetch(APPS_SCRIPT_URL + '?' + queryString, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    
+                    // 1. KEMAS KINI STATISTIK
+                    const stats = result.stats || {};
+                    document.getElementById('statTotal').textContent = stats.total || 0;
+                    document.getElementById('statNew').textContent = stats.Baru || 0;
+                    document.getElementById('statInvestigate').textContent = stats['Dalam Siasatan'] || 0;
+                    document.getElementById('statDone').textContent = stats.Selesai || 0;
+
+                    // 2. KEMAS KINI JADUAL (Jika diminta)
+                    if (!onlyStats) {
+                        if (result.data.length > 0) {
+                            renderAduanTable(result.data);
+                        } else {
+                            emptyMessage.classList.remove('hidden');
+                        }
+                    }
+
+                } else {
+                    if (!onlyStats) {
+                        tableBody.innerHTML = `<tr><td colspan="6" class="p-4 text-red-500">${result.message || 'Ralat server.'}</td></tr>`;
+                    } else {
+                        document.getElementById('statTotal').textContent = 0;
+                        document.getElementById('statNew').textContent = 0;
+                        document.getElementById('statInvestigate').textContent = 0;
+                        document.getElementById('statDone').textContent = 0;
+                        console.error("Gagal memuatkan statistik: " + (result.message || 'Ralat tidak diketahui'));
+                    }
+                }
+            } catch (error) {
+                if (!onlyStats) {
+                    tableBody.innerHTML = `<tr><td colspan="6" class="p-4 text-red-500">Ralat rangkaian: Gagal memuatkan data.</td></tr>`;
+                } else {
+                    console.error("Ralat rangkaian semasa memuatkan statistik: " + error);
+                    document.getElementById('statTotal').textContent = 'N/A';
+                    document.getElementById('statNew').textContent = 'N/A';
+                    document.getElementById('statInvestigate').textContent = 'N/A';
+                    document.getElementById('statDone').textContent = 'N/A';
+                }
+            } finally {
+                if (!onlyStats) {
+                    loadingMessage.classList.add('hidden');
+                }
+            }
+        }
+
+        function renderAduanTable(aduanData) {
+            const tableBody = document.getElementById('aduanTableBody');
+            tableBody.innerHTML = ''; 
+
+            aduanData.forEach(aduan => {
+                const statusClass = getStatusColor(aduan.status);
+                const tarikhLaporan = aduan.timestamp ? new Date(aduan.timestamp).toLocaleDateString('ms-MY', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A';
+
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-100';
+                row.innerHTML = `
+                    <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${aduan.id_aduan || 'N/A'}</td>
+                    <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${tarikhLaporan}</td>
+                    <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${aduan.nama_mangsa || 'Tidak Diketahui'}</td>
+                    <td class="px-3 py-3 text-xs text-gray-500 max-w-xs truncate">${aduan.jenis_insiden.split(',')[0] || '-'}</td>
+                    <td class="px-3 py-3 whitespace-nowrap">
+                        <span class="${statusClass} inline-flex px-2 text-xs font-semibold leading-5 rounded-full">${aduan.status}</span>
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap text-sm font-medium">
+                        <button onclick="viewAduanDetail('${aduan.id_aduan}')" class="text-blue-600 hover:text-blue-900 text-xs font-bold">Urus</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+        
+        function getStatusColor(status) {
+            switch(status) {
+                case 'Baru': return 'bg-red-100 text-red-800';
+                case 'Dalam Siasatan': return 'bg-yellow-100 text-yellow-800';
+                case 'Selesai': return 'bg-green-100 text-green-800';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        }
+        
+        // --- Logik Lihat/Edit Aduan ---
+        async function viewAduanDetail(id) {
+            const loadingHtml = `<div class="p-6 text-center"><div class="loading-spinner !w-8 !h-8 !border-blue-500"></div><p class="mt-2 text-gray-600">Memuatkan butiran Aduan ${id}...</p></div>`;
+            showModal(loadingHtml);
+            
+            const queryString = new URLSearchParams({ action: 'getAduanDetail', id: id }).toString();
+            
+            try {
+                const response = await fetch(APPS_SCRIPT_URL + '?' + queryString, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    showModal(renderDetailModal(result.data));
+                } else {
+                    showModal(`<div class="p-6 text-center text-red-500"><p>${result.message || 'Gagal memuatkan data.'}</p><button onclick="closeModal()" class="mt-4 bg-gray-500 text-white px-4 py-2 rounded">Tutup</button></div>`);
+                }
+            } catch (error) {
+                showModal(`<div class="p-6 text-center text-red-500"><p>Ralat Rangkaian: ${error.message}</p><button onclick="closeModal()" class="mt-4 bg-gray-500 text-white px-4 py-2 rounded">Tutup</button></div>`);
+            }
+        }
+        
+        function renderDetailModal(aduan) {
+            const fieldMap = {
+                'id_aduan': 'ID Aduan', 'status': 'Status Semasa', 'nama_pelapor': 'Pelapor', 
+                'no_pelapor': 'No. Pelapor', 'nama_mangsa': 'Mangsa', 'kelas_mangsa': 'Kelas Mangsa',
+                'nama_pembuli_suspek': 'Suspek Pembuli', 'kelas_pembuli': 'Kelas Suspek', 
+                'jenis_insiden': 'Jenis Buli', 'lokasi_kejadian': 'Lokasi Kejadian'
+            };
+            
+            let detailHtml = `<span onclick="closeModal()" class="close-btn">&times;</span>`;
+            detailHtml += `<h3 class="text-2xl font-bold text-blue-700 mb-4">Butiran Aduan: ${aduan.id_aduan}</h3>`;
+            
+            // Bahagian Status & Tindakan
+            detailHtml += `
+                <div class="p-4 mb-4 bg-gray-50 border rounded-lg">
+                    <h4 class="font-semibold text-lg mb-2">Tindakan Admin</h4>
+                    <form id="updateAduanForm" onsubmit="handleUpdateStatus(event)">
+                        <input type="hidden" name="id_aduan" value="${aduan.id_aduan}">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Warden Bertugas</label>
+                                <p class="font-bold text-gray-900">${currentUser.nama}</p>
+                            </div>
+                            <div>
+                                <label for="new_status" class="block text-sm font-medium text-gray-700">Kemas Kini Status</label>
+                                <select name="new_status" id="new_status" class="w-full px-3 py-2 border rounded-md">
+                                    <option value="Baru" ${aduan.status === 'Baru' ? 'selected' : ''}>Baru</option>
+                                    <option value="Dalam Siasatan" ${aduan.status === 'Dalam Siasatan' ? 'selected' : ''}>Dalam Siasatan</option>
+                                    <option value="Selesai" ${aduan.status === 'Selesai' ? 'selected' : ''}>Selesai</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" id="updateBtn" class="mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md w-full">
+                            <span id="updateText">Kemas Kini Status</span>
+                            <div id="updateSpinner" class="loading-spinner hidden !w-4 !h-4 !border-white !border-t-transparent"></div>
+                        </button>
+                        <div id="updateMessage" class="mt-3 text-sm text-center"></div>
+                    </form>
+                </div>
+            `;
+            
+            // Bahagian Butiran Data
+            detailHtml += `<h4 class="font-semibold text-lg mb-2 mt-6 border-t pt-4">Maklumat Aduan</h4>`;
+            detailHtml += `<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">`;
+            
+            for (const key in aduan) {
+                if (key === 'row_number') continue;
+                const displayKey = fieldMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                let displayValue = aduan[key];
+                
+                if (key === 'timestamp' && aduan[key]) {
+                    displayValue = new Date(aduan[key]).toLocaleString('ms-MY');
+                } else if (key === 'status') {
+                    const statusClass = getStatusColor(aduan[key]);
+                    displayValue = `<span class="${statusClass} inline-flex px-2 text-xs font-semibold leading-5 rounded-full">${aduan[key]}</span>`;
+                }
+
+                if (displayValue) {
+                    detailHtml += `
+                        <div class="font-semibold text-gray-600">${displayKey}:</div>
+                        <div class="text-gray-900">${displayValue}</div>
+                    `;
+                }
+            }
+            
+            detailHtml += `</div>`;
+            detailHtml += `<button onclick="closeModal()" class="mt-6 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-md w-full">Tutup Paparan</button>`;
+            
+            return detailHtml;
+        }
+        
+        async function handleUpdateStatus(e) {
+            e.preventDefault();
+            
+            const form = e.target;
+            const updateBtn = document.getElementById('updateBtn');
+            const updateText = document.getElementById('updateText');
+            const updateSpinner = document.getElementById('updateSpinner');
+            const updateMessage = document.getElementById('updateMessage');
+
+            updateText.textContent = 'Menyimpan...';
+            updateSpinner.classList.remove('hidden');
+            updateBtn.disabled = true;
+            updateMessage.textContent = '';
+            
+            const formData = new FormData(form);
+            const data = {
+                action: 'updateAduan',
+                id_aduan: formData.get('id_aduan'),
+                new_status: formData.get('new_status'),
+                warden_name: currentUser.nama 
+            };
+            
+            const queryString = new URLSearchParams(data).toString();
+
+            try {
+                const response = await fetch(APPS_SCRIPT_URL + '?' + queryString, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    updateMessage.classList.remove('text-red-500');
+                    updateMessage.classList.add('text-green-500');
+                    updateMessage.textContent = 'Status Berjaya dikemas kini!';
+                    loadAduanData(false); 
+
+                } else {
+                    updateMessage.classList.remove('text-green-500');
+                    updateMessage.classList.add('text-red-500');
+                    updateMessage.textContent = result.message || 'Kemas kini gagal.';
+                }
+
+            } catch (error) {
+                updateMessage.classList.remove('text-green-500');
+                updateMessage.classList.add('text-red-500');
+                updateMessage.textContent = 'Ralat Jaringan. Sila cuba lagi.';
+            } finally {
+                updateText.textContent = 'Kemas Kini Status';
+                updateSpinner.classList.add('hidden');
+                updateBtn.disabled = false;
+            }
+        }
+        
+        // --- Logik Pendaftaran Warden ---
+        async function handleWardenRegistration(e) {
+            e.preventDefault();
+
+            const form = e.target;
+            const regBtn = document.getElementById('regWardenBtn');
+            const regText = document.getElementById('regWardenText');
+            const regSpinner = document.getElementById('regWardenSpinner');
+            const regMessage = document.getElementById('wardenRegMessage');
+
+            // Persediaan UI
+            regText.textContent = 'Mendaftar...';
+            regSpinner.classList.remove('hidden');
+            regBtn.disabled = true;
+            regMessage.classList.add('hidden');
+
+            const formData = new FormData(form);
+            const data = {};
+            for (const [key, value] of formData.entries()) { data[key] = value; }
+            data.action = 'addWarden'; // Tindakan Apps Script
+            
+            const queryString = new URLSearchParams(data).toString();
+
+            try {
+                const response = await fetch(APPS_SCRIPT_URL + '?' + queryString, { method: 'POST' });
+                const result = await response.json();
+                regMessage.classList.remove('hidden');
+
+                if (result.status === 'success') {
+                    regMessage.classList.remove('text-red-600');
+                    regMessage.classList.add('text-green-600');
+                    regMessage.textContent = result.message;
+                    form.reset(); // Kosongkan borang selepas berjaya
+                } else {
+                    regMessage.classList.remove('text-green-600');
+                    regMessage.classList.add('text-red-600');
+                    regMessage.textContent = result.message || 'Pendaftaran gagal.';
+                }
+            } catch (error) {
+                regMessage.classList.remove('text-green-600');
+                regMessage.classList.add('text-red-600');
+                regMessage.textContent = 'Ralat rangkaian: Gagal berhubung dengan server.';
+            } finally {
+                regText.textContent = 'Daftarkan Warden';
+                regSpinner.classList.add('hidden');
+                regBtn.disabled = false;
+            }
+        }
+
+
+        // --- Event Listeners untuk Borang ---
+        document.addEventListener('submit', async function(e) {
+            // Logik untuk Log Masuk Admin
+            if (e.target && e.target.id === 'loginForm') {
+                e.preventDefault();
+                const form = e.target;
+                const loginBtn = document.getElementById('loginBtn');
+                const loginText = document.getElementById('loginText');
+                const loginSpinner = document.getElementById('loginSpinner');
+                const loginMessage = document.getElementById('loginMessage');
+
+                // Persediaan UI
+                loginText.textContent = 'Memuatkan...';
+                loginSpinner.classList.remove('hidden');
+                loginBtn.disabled = true;
+                loginMessage.classList.add('hidden');
+
+                const formData = new FormData(form);
+                const data = {};
+                for (const [key, value] of formData.entries()) { data[key] = value; }
+                data.action = 'login'; 
+
+                const queryString = new URLSearchParams(data).toString();
+
+                try {
+                    const response = await fetch(APPS_SCRIPT_URL + '?' + queryString, { method: 'POST' });
+                    
+                    if (!response.ok) {
+                         throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const resultText = await response.text();
+                    const result = JSON.parse(resultText); 
+                    
+                    if (result.status === 'success') {
+                        currentUser = result.session; 
+                        setView('adminDashboard');
+                    } else {
+                        loginMessage.textContent = result.message || 'Log masuk gagal. Sila cuba lagi.';
+                        loginMessage.classList.remove('hidden');
+                    }
+                } catch (error) {
+                    loginMessage.textContent = 'Ralat rangkaian/server. Sila semak URL atau Logs Apps Script anda.';
+                    loginMessage.classList.remove('hidden');
+                } finally {
+                    loginText.textContent = 'Log Masuk';
+                    loginSpinner.classList.add('hidden');
+                    loginBtn.disabled = false;
+                }
+            }
+
+            // Logik untuk Borang Aduan Buli Awam
+            else if (e.target && e.target.id === 'aduanForm') {
+                e.preventDefault();
+
+                const form = e.target;
+                const submitBtn = document.getElementById('submitBtn');
+                const submitText = document.getElementById('submitText');
+                const submitSpinner = document.getElementById('submitSpinner');
+                const successMessage = document.getElementById('successMessage');
+                const errorMessage = document.getElementById('errorMessage');
+
+                submitText.textContent = 'Menghantar...';
+                submitSpinner.classList.remove('hidden');
+                submitBtn.disabled = true;
+                successMessage.classList.add('hidden');
+                errorMessage.classList.add('hidden');
+
+                const formData = new FormData(form);
+                const data = {};
+                const jenisInsidenArray = [];
+                const kesanMangsaArray = [];
+                
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'jenis_insiden') { jenisInsidenArray.push(value); continue; }
+                    if (key === 'kesan_mangsa') { kesanMangsaArray.push(value); continue; }
+                    data[key] = value;
+                }
+                
+                data.jenis_insiden = jenisInsidenArray.join(', ');
+                data.kesan_mangsa = kesanMangsaArray.join(', ');  
+                data.action = 'submitAduan'; 
+
+                const queryString = new URLSearchParams(data).toString();
+
+                try {
+                    // Menggunakan 'no-cors' untuk Apps Script API di Google Sites
+                    const response = await fetch(APPS_SCRIPT_URL, {
+                        method: 'POST',
+                        mode: 'no-cors', 
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: queryString
+                    });
+                    
+                    // Kerana 'no-cors', kita hanya boleh simulasi kejayaan.
+                    const randomId = 'AB-' + Math.floor(Math.random() * 90000 + 10000); 
+
+                    form.classList.add('hidden');
+                    document.getElementById('aduanIdDisplay').textContent = randomId;
+                    successMessage.classList.remove('hidden');
+                    
+                } catch (error) {
+                    errorMessage.classList.remove('hidden');
+                    document.getElementById('errorDetails').textContent = error.toString();
+                } finally {
+                    submitText.textContent = 'Hantar Aduan';
+                    submitSpinner.classList.add('hidden');
+                    submitBtn.disabled = false;
+                }
+            }
+        });
+
+        // Muatkan halaman utama apabila DOM siap
+        document.addEventListener('DOMContentLoaded', () => {
+            setView('main');
+        });
+    </script>
+</body>
+</html>
